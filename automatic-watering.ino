@@ -31,7 +31,7 @@
 #define BTN_DOWN 9
 #define NO_BTN 0
 
-#define ANALOG_SENSOR_POWER 10
+#define ANALOG_SENSOR_CONTROL 10
 
 const char daysInMonth[] = {31,28,31,30,31,30,31,31,30,31,30,31};
 unsigned long lastBtnPress = 0; // time in ms
@@ -59,11 +59,6 @@ void setup(void)
   setupAsInterrupt();
   attachInterrupt(digitalPinToInterrupt(BTN_INTERRUPT_PIN), pressInterrupt, FALLING);
 }
-
-//ISR (WDT_vect)
-//{
-//  wdt_disable();
-//}
 
 void loop(void)
 { 
@@ -401,8 +396,8 @@ void wakeUp() {
     sleep_disable();
     power_all_enable();
     ADCSRA |= (1 << ADEN); // wake up ADC
-    pinMode(ANALOG_SENSOR_POWER, OUTPUT);
-    digitalWrite(ANALOG_SENSOR_POWER, HIGH);
+    pinMode(ANALOG_SENSOR_CONTROL, OUTPUT);
+    digitalWrite(ANALOG_SENSOR_CONTROL, LOW);
     delay(20);
     tempSensors.begin();
     rtc.begin();
@@ -415,7 +410,7 @@ void wakeUp() {
 
 void putToSleep() {
   noInterrupts();
-  digitalWrite(ANALOG_SENSOR_POWER, LOW); // turn off capacitive soil moisture sensor v1.2 using NPN 2N2222, save around 5mA, TODO - replace by P-Channel MOSFET
+  digitalWrite(ANALOG_SENSOR_CONTROL, HIGH); // turn off capacitive soil moisture sensor v1.2 using P-Channel MOSFET BS250, save around 5mA
   oled.ssd1306WriteCmd(0xAE); // turn off oled
   set_sleep_mode(SLEEP_MODE_PWR_DOWN); // set powerdown state for ATmega
   ADCSRA = 0; // put ADC to sleep, save around 0.250mA
@@ -423,5 +418,5 @@ void putToSleep() {
   sleep_enable();
   sleeping = true;
   interrupts(); 
-  sleep_cpu();
+  sleep_cpu(); // When sleeping current goes down to 0.035mA
 }
