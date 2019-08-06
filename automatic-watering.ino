@@ -6,18 +6,21 @@
 #include <Sodaq_DS3231.h>
 #include <avr/sleep.h>
 #include <avr/power.h>
+#include <EEPROM.h>
 
 #define F_CPU 8000000L
-#define I2C_ADDRESS 0x3C
-#define ONE_WIRE_BUS 4
+#define I2C_OLED_ADDRESS 0x3C
+#define ONE_WIRE_BUS_PIN 4
 
 #define MAIN_SCREEN 0
 #define MENU_SCREEN 1
 #define TIME_SETUP_SCREEN 2
+#define SLEEP_SETUP_SCREEN 3
 
 #define POSITION_DEFAULT 0
 #define MENU_TIME_POSITION POSITION_DEFAULT
-#define MENU_EXIT_POSITION 1
+#define MENU_SLEEP_POSITION 1
+#define MENU_EXIT_POSITION 2
 
 #define TIME_YEAR_POSITION POSITION_DEFAULT
 #define TIME_MONTH_POSITION 1
@@ -33,6 +36,8 @@
 
 #define ANALOG_SENSOR_CONTROL 10
 
+#define SLEEP_EEPROM_ADDR 0
+
 const char daysInMonth[] = {31,28,31,30,31,30,31,31,30,31,30,31};
 unsigned long lastBtnPress = 0; // time in ms
 unsigned char lastButton = 0; // number of button
@@ -47,9 +52,10 @@ unsigned char setHour = 0;
 unsigned char setMinute = 0;
 
 bool sleeping = true;
+unsigned int sleepAfter;
 
 DateTime now;
-OneWire oneWire(ONE_WIRE_BUS);
+OneWire oneWire(ONE_WIRE_BUS_PIN);
 DallasTemperature tempSensors(&oneWire);
 SSD1306AsciiAvrI2c oled;
 
@@ -58,10 +64,28 @@ void setup(void)
   wakeUp();
   setupAsInterrupt();
   attachInterrupt(digitalPinToInterrupt(BTN_INTERRUPT_PIN), pressInterrupt, FALLING);
+  byte sleepByte = EEPROM.read(SLEEP_EEPROM_ADDR);
+  switch (sleepByte) {
+    case 1:
+      sleepAfter = 15000;
+      break;
+    case 2:
+      sleepAfter = 30000;
+      break;
+    case 3:
+      sleepAfter = 45000;
+      break;
+    case 4:
+      sleepAfter = 60000;
+      break;
+    default:
+      sleepAfter = 30000;
+      break;
+  }
 }
 
 void loop(void)
-{ 
+{
   unsigned char btn = lastButton;
   lastButton = NO_BTN;
 
@@ -85,11 +109,13 @@ void loop(void)
       menuScreen();
       break;
     case TIME_SETUP_SCREEN:
-      timeScreen(btn);
+      timeScreen();
       break;
+    case SLEEP_SETUP_SCREEN:
+      sleepScreen();
   }
 
-  if (millis() - lastBtnPress > 30000) {
+  if (millis() - lastBtnPress > sleepAfter) {
     putToSleep();
   } else {
     delay(100);
@@ -99,10 +125,10 @@ void loop(void)
 /*******************
  * PROCESS BUTTONS *
  *******************/
- 
+
 void handleSetButton() {
   oled.clear();
-  
+
   if (actualScreen == MAIN_SCREEN) {
     actualScreen = MENU_SCREEN;
     screenPosition = POSITION_DEFAULT;
@@ -120,6 +146,10 @@ void handleSetButton() {
         setDay = now.date();
         setHour = now.hour();
         setMinute = now.minute();
+        break;
+      case MENU_SLEEP_POSITION:
+        actualScreen = SLEEP_SETUP_SCREEN;
+        screenPosition = POSITION_DEFAULT;
         break;
       case MENU_EXIT_POSITION:
         actualScreen = MAIN_SCREEN;
@@ -144,6 +174,31 @@ void handleSetButton() {
         screenPosition = POSITION_DEFAULT;
         break;
     }
+    return;
+  }
+
+  if (actualScreen == SLEEP_SETUP_SCREEN) {
+    byte sleepByte;
+    switch (sleepAfter) {
+      case 15000:
+        sleepByte = 1;
+        break;
+      case 30000:
+        sleepByte = 2;
+        break;
+      case 45000:
+        sleepByte = 3;
+        break;
+      case 60000:
+        sleepByte = 4;
+        break;
+      default:
+        sleepByte = 2;
+        break;
+    }
+    EEPROM.write(SLEEP_EEPROM_ADDR, sleepByte);
+    actualScreen = MENU_SCREEN;
+    screenPosition = POSITION_DEFAULT;
     return;
   }
 }
@@ -194,7 +249,16 @@ void handleUpButton() {
         } else {
           setMinute++;
         }
-        break; 
+        break;
+    }
+    return;
+  }
+
+  if (actualScreen == SLEEP_SETUP_SCREEN) {
+    if (sleepAfter >= 60000) {
+      sleepAfter = 15000;
+    } else {
+      sleepAfter+=15000;
     }
     return;
   }
@@ -246,7 +310,16 @@ void handleDownButton() {
         } else {
           setMinute--;
         }
-        break; 
+        break;
+    }
+    return;
+  }
+
+  if (actualScreen == SLEEP_SETUP_SCREEN) {
+    if (sleepAfter >= 15000) {
+      sleepAfter = 60000;
+    } else {
+      sleepAfter-=15000;
     }
     return;
   }
@@ -256,7 +329,7 @@ void handleDownButton() {
  * SCREENS *
  ***********/
 
-void timeScreen(unsigned char btn) {
+void timeScreen() {
   oled.setRow(1);
   oled.setCol(1);
   oled.print("Nastav cas a datum");
@@ -285,10 +358,23 @@ void timeScreen(unsigned char btn) {
     case TIME_MINUTE_POSITION:
       oled.print("Minuta: ");
       oled.print(setMinute);
-      break; 
+      break;
   }
   oled.clearToEOL ();
-} 
+}
+
+void sleepSceen() {
+  oled.setRow(1);
+  oled.setCol(1);
+  oled.print("Usporny rezim");
+  oled.clearToEOL ();
+
+  oled.setRow(3);
+  oled.setCol(1);
+  oled.print(sleepAfter / 1000, DEC);
+  oled.print("s");
+  oled.clearToEOL ();
+}
 
 void menuScreen() {
   oled.setRow(1);
@@ -298,7 +384,7 @@ void menuScreen() {
 
   oled.setRow(2);
   oled.setCol(1);
-  if (screenPosition == 0) {
+  if (screenPosition == MENU_TIME_POSITION) {
     oled.print("*");
   } else {
     oled.print(" ");
@@ -308,7 +394,17 @@ void menuScreen() {
 
   oled.setRow(3);
   oled.setCol(1);
-  if (screenPosition == 1) {
+  if (screenPosition == MENU_SLEEP_POSITION) {
+    oled.print("*");
+  } else {
+    oled.print(" ");
+  }
+  oled.print("Usporny rezim");
+  oled.clearToEOL ();
+
+  oled.setRow(4);
+  oled.setCol(1);
+  if (screenPosition == MENU_EXIT_POSITION) {
     oled.print("*");
   } else {
     oled.print(" ");
@@ -325,12 +421,12 @@ void mainScreen() {
   now = rtc.now();
   char actual_time[16];
   sprintf(actual_time, "%02d:%02d %02d.%02d.%04d", now.hour(), now.minute(), now.date(), now.month(), now.year());
-  
+
   oled.setRow(1);
   oled.setCol(3);
   oled.print(actual_time);
   oled.clearToEOL ();
-    
+
   oled.setRow(4);
   oled.setCol(1);
   oled.print("Teplota: ");
@@ -352,11 +448,11 @@ void pressInterrupt() {
     return;
   }
   wakeUp();
-  
+
   lastBtnPress = millis();
 
   setupAsButtons();
-  
+
   // test for pressed button
   if (!digitalRead(BTN_SET)) {
     lastButton = BTN_SET;
@@ -367,7 +463,7 @@ void pressInterrupt() {
   if (!digitalRead(BTN_DOWN)) {
     lastButton = BTN_DOWN;
   }
-  
+
   setupAsInterrupt();
 }
 
@@ -386,7 +482,7 @@ void setupAsButtons() {
   pinMode(BTN_UP, INPUT_PULLUP);
   pinMode(BTN_DOWN, INPUT_PULLUP);
   pinMode(BTN_INTERRUPT_PIN, OUTPUT);
-  digitalWrite(BTN_INTERRUPT_PIN, LOW); 
+  digitalWrite(BTN_INTERRUPT_PIN, LOW);
 }
 
 void wakeUp() {
@@ -401,10 +497,10 @@ void wakeUp() {
     delay(20);
     tempSensors.begin();
     rtc.begin();
-    oled.begin(&Adafruit128x64, I2C_ADDRESS);
+    oled.begin(&Adafruit128x64, I2C_OLED_ADDRESS);
     oled.setFont(Adafruit5x7);
     oled.clear();
-    interrupts(); 
+    interrupts();
   }
 }
 
@@ -417,6 +513,7 @@ void putToSleep() {
   power_all_disable(); // put everything other to sleep
   sleep_enable();
   sleeping = true;
-  interrupts(); 
+  interrupts();
   sleep_cpu(); // When sleeping current goes down to 0.035mA
+  lastButton = NO_BTN; // after waking up by any button don't do action assignet to button
 }
