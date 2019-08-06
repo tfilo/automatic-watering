@@ -316,7 +316,7 @@ void handleDownButton() {
   }
 
   if (actualScreen == SLEEP_SETUP_SCREEN) {
-    if (sleepAfter >= 15000) {
+    if (sleepAfter <= 15000) {
       sleepAfter = 60000;
     } else {
       sleepAfter-=15000;
@@ -363,7 +363,7 @@ void timeScreen() {
   oled.clearToEOL ();
 }
 
-void sleepSceen() {
+void sleepScreen() {
   oled.setRow(1);
   oled.setCol(1);
   oled.print("Usporny rezim");
@@ -415,8 +415,10 @@ void menuScreen() {
 
 void mainScreen() {
   tempSensors.requestTemperatures(); // Send the command to get temperatures
-  float soilTemperature = tempSensors.getTempCByIndex(0);
-  int soilHumidity = analogRead(A0);
+  float soilTemperature1 = tempSensors.getTempCByIndex(0);
+  float soilTemperature2 = tempSensors.getTempCByIndex(1);
+  int soilHumidity1 = analogRead(A0);
+  int soilHumidity2 = analogRead(A1);
 
   now = rtc.now();
   char actual_time[16];
@@ -429,14 +431,26 @@ void mainScreen() {
 
   oled.setRow(4);
   oled.setCol(1);
-  oled.print("Teplota: ");
-  oled.print(soilTemperature);
+  oled.print("Teplota 1: ");
+  oled.print(soilTemperature1);
   oled.clearToEOL ();
 
   oled.setRow(5);
   oled.setCol(1);
-  oled.print("Vlh. pody: ");
-  oled.print(soilHumidity);
+  oled.print("Vlh. pody 1: ");
+  oled.print(soilHumidity1);
+  oled.clearToEOL ();
+
+  oled.setRow(6);
+  oled.setCol(1);
+  oled.print("Teplota 2: ");
+  oled.print(soilTemperature2);
+  oled.clearToEOL ();
+
+  oled.setRow(7);
+  oled.setCol(1);
+  oled.print("Vlh. pody 2: ");
+  oled.print(soilHumidity2);
   oled.clearToEOL ();
 }
 
