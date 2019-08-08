@@ -421,7 +421,7 @@ void mainScreen() {
   int soilHumidity2 = analogRead(A1);
 
   now = rtc.now();
-  char actual_time[16];
+  char actual_time[17];
   sprintf(actual_time, "%02d:%02d %02d.%02d.%04d", now.hour(), now.minute(), now.date(), now.month(), now.year());
 
   oled.setRow(1);
@@ -506,15 +506,14 @@ void wakeUp() {
     sleep_disable();
     power_all_enable();
     ADCSRA |= (1 << ADEN); // wake up ADC
+    interrupts();
     pinMode(ANALOG_SENSOR_CONTROL, OUTPUT);
     digitalWrite(ANALOG_SENSOR_CONTROL, LOW);
-    delay(20);
     tempSensors.begin();
     rtc.begin();
     oled.begin(&Adafruit128x64, I2C_OLED_ADDRESS);
     oled.setFont(Adafruit5x7);
     oled.clear();
-    interrupts();
   }
 }
 
