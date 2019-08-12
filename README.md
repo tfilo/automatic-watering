@@ -3,15 +3,15 @@ This is code for my DIY ATmega328p based watering system with monitoring soil te
 
 This source code use following libraries:
 
-**MAX31850 OneWire**
+**DallasTemperature**
 
-https://github.com/adafruit/MAX31850_OneWire
+https://github.com/milesburton/Arduino-Temperature-Control-Library
 
-author=Adafruit
+author=Miles Burton <miles@mnetcs.com>, Tim Newsome <nuisance@casualhacker.net>, Guil Barros <gfbarros@bappos.com>, Rob Tillaart <rob.tillaart@gmail.com>
 
-maintainer=Adafruit <info@adafruit.com>
+maintainer=Miles Burton <miles@mnetcs.com>
 
-version=1.0.1
+version=3.8.0
 
 **OneWire**
 
