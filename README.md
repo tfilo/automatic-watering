@@ -15,11 +15,11 @@ version=3.8.0
 
 **OneWire**
 
-https://github.com/PaulStoffregen/OneWire
+http://www.pjrc.com/teensy/td_libs_OneWire.html
 
-author=Jim Studt
+author=Jim Studt, Tom Pollard, Robin James, Glenn Trewitt, Jason Dangel, Guillermo Lovato, Paul Stoffregen, Scott Roberts, Bertrik Sikken, Mark Tillotson, Ken Butcher, Roger Clark, Love Nystrom
 
-maintainer=Paul Stoffregen, paul@pjrc.com
+maintainer=Paul Stoffregen
 
 version=2.3.4
 
@@ -29,6 +29,8 @@ https://github.com/SodaqMoja/Sodaq_DS3231
 
 author=keestux,SODAQ
 
+maintainer=Kees Bakker <kees@m2m4all.com>
+
 version=1.2.2
 
 **SSD1306Ascii**
@@ -36,5 +38,7 @@ version=1.2.2
 https://github.com/greiman/SSD1306Ascii
 
 author=Bill Greiman <fat16lib@sbcglobal.net>
+
+maintainer=Bill Greiman <fat16lib@sbcglobal.net>
 
 version=1.2.4
