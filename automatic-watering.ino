@@ -20,24 +20,25 @@
 #define MOISTURE_SENSOR_6 A2 // group 2
 
 #define MOISTURE_GROUP1_CONTROL 10
-#define MOISTURE_GROUP2_CONTROL 11 // ?? TODO overit tento PIN ci ho uz nepouzivam !!!!!!!!!!!!!!!!!!!!!!!!!!
+#define MOISTURE_GROUP2_CONTROL 6
 
-#define MOISTURE_SENSORS_MAX_COUNT 6
+#define MAX_SUPPORTED_MOISTURE_SENSORS 6
+#define EXIT_SENSOR_CALIBRATION_MENU MAX_SUPPORTED_MOISTURE_SENSORS
 
 #define MAIN_SCREEN 0
 #define MENU_SCREEN 1
 #define TIME_SETUP_SCREEN 2
 #define SLEEP_SETUP_SCREEN 3
-#define MOISTURE_ENABLE_SCREEN 4
-#define MENU_SENSOR_CALIBRATION_SCREEN() 5
+#define SENSORS_ENABLE_SCREEN 4
+#define MENU_SENSORS_CALIBRATION_SCREEN 5
 
-#define SENSOR_CALIBRATION_SCREEN() 10
+#define SENSOR_CALIBRATION_SCREEN 10
 
 #define POSITION_DEFAULT 0
 #define MENU_TIME_POSITION POSITION_DEFAULT
 #define MENU_SLEEP_POSITION 1
-#define MENU_MOISTURE_POSITION 2
-#define MENU_CALIBRATION_POSITION 3
+#define MENU_SENSORS_ENABLE_POSITION 2
+#define MENU_SENSOR_CALIBRATION_POSITION 3
 #define MENU_EXIT_POSITION 4
 
 #define TIME_YEAR_POSITION POSITION_DEFAULT
@@ -46,7 +47,7 @@
 #define TIME_HOUR_POSITION 3
 #define TIME_MINUTE_POSITION 4
 
-#define MOISTURE_ENABLE_POSITION POSITION_DEFAULT
+#define SENSOR_ENABLE_POSITION POSITION_DEFAULT
 
 #define BTN_INTERRUPT_PIN 2
 #define BTN_SET 7
@@ -55,7 +56,9 @@
 #define NO_BTN 0
 
 #define SLEEP_EEPROM_ADDR 0
-#define ENABLE_MOISTURE_EEPROM_ADDR 5
+#define ENABLED_SENSORS_EEPROM_ADDR 5
+#define MIN_MOISTURE_EEPROM_ADDR 10
+#define MAX_MOISTURE_EEPROM_ADDR 30
 
 const char daysInMonth[] = {31,28,31,30,31,30,31,31,30,31,30,31};
 unsigned long lastBtnPress = 0; // time in ms
@@ -73,13 +76,13 @@ unsigned char setMinute = 0;
 bool sleeping = true;
 unsigned int sleepAfter;
 
-byte enabledMoistureSensors; // up to 6 sensors (0-5), ignore bit 6 and 7 (0 == false)
+byte enabledSensors; // up to 6 sensors (0-5), ignore bit 6 and 7 (0 == false)
 int moistureMin[] = {0, 0, 0, 0, 0, 0};
 int moistureMax[] = {1023, 1023, 1023, 1023, 1023, 1023};
  
 DateTime now;
 OneWire oneWire(ONE_WIRE_BUS_PIN);
-DallasTemperature tempSensors(&oneWire);
+DallasTemperature tempSensor(&oneWire);
 SSD1306AsciiAvrI2c oled;
 
 void setup(void)
@@ -88,11 +91,11 @@ void setup(void)
   pinMode(MOISTURE_GROUP2_CONTROL, OUTPUT);
   digitalWrite(MOISTURE_GROUP1_CONTROL, HIGH); // keep sensors turned off
   digitalWrite(MOISTURE_GROUP2_CONTROL, HIGH); // keep sensors turned off
-  // THIS part doesn't need to be in wakeUp function ???
-  tempSensors.begin();
+  tempSensor.begin();
   rtc.begin();
   oled.begin(&Adafruit128x64, I2C_OLED_ADDRESS);
   oled.setFont(Adafruit5x7);
+  oled.clear();
   
   setupAsInterrupt();
   attachInterrupt(digitalPinToInterrupt(BTN_INTERRUPT_PIN), pressInterrupt, FALLING);
@@ -128,12 +131,16 @@ void loop(void)
       break;
     case SLEEP_SETUP_SCREEN:
       sleepScreen();
-    case MOISTURE_ENABLE_SCREEN:
-      moistureScreen();
-    case MENU_SENSOR_CALIBRATION_SCREEN():
-      calibrationMenuScreen();
-    case SENSOR_CALIBRATION_SCREEN():
-      calibrateSensorScreen();
+      break;
+    case SENSORS_ENABLE_SCREEN:
+      sensorsEnableScreen();
+      break;
+    case MENU_SENSORS_CALIBRATION_SCREEN:
+      sensorsCalibrationMenuScreen();
+      break;
+    case SENSOR_CALIBRATION_SCREEN:
+      sensorCalibrationScreen();
+      break;
   }
 
   if (millis() - lastBtnPress > sleepAfter) {
@@ -172,23 +179,15 @@ void handleSetButton() {
         actualScreen = SLEEP_SETUP_SCREEN;
         screenPosition = POSITION_DEFAULT;
         break;
-      case MENU_MOISTURE_POSITION:
-        actualScreen = MOISTURE_ENABLE_SCREEN;
+      case MENU_SENSORS_ENABLE_POSITION:
+        actualScreen = SENSORS_ENABLE_SCREEN;
         screenPosition = POSITION_DEFAULT;
         break;
-      case MENU_CALIBRATION_POSITION:
-        actualScreen = MENU_SENSOR_CALIBRATION_SCREEN();
+      case MENU_SENSOR_CALIBRATION_POSITION:
+        actualScreen = MENU_SENSORS_CALIBRATION_SCREEN;
         screenPosition = POSITION_DEFAULT;
-        byte count = 0;
-        while (bitRead(enabledMoistureSensors, screenPosition)==0) { // if disabled, jump to next enabled in same direction
-          count++;
+        while (screenPosition != EXIT_SENSOR_CALIBRATION_MENU && bitRead(enabledSensors, screenPosition)==0) { // if disabled, jump to next enabled in same direction
           screenPosition++;
-          if (screenPosition == MOISTURE_SENSORS_MAX_COUNT - 1) {
-            screenPosition = POSITION_DEFAULT;
-          }
-          if (count > MOISTURE_SENSORS_MAX_COUNT) {
-            break; // just to prevent infinite loop if some error  
-          }
         }
         break;
       case MENU_EXIT_POSITION:
@@ -243,10 +242,10 @@ void handleSetButton() {
     return;
   }
 
-  if (actualScreen == MOISTURE_ENABLE_SCREEN) {
-    if (screenPosition >= MOISTURE_SENSORS_MAX_COUNT) {
-      EEPROM.write(ENABLE_MOISTURE_EEPROM_ADDR, enabledMoistureSensors);
-      EEPROM.write(ENABLE_MOISTURE_EEPROM_ADDR + 1, 255 ^ enabledMoistureSensors);
+  if (actualScreen == SENSORS_ENABLE_SCREEN) {
+    if (screenPosition >= MAX_SUPPORTED_MOISTURE_SENSORS - 1) {
+      EEPROM.write(ENABLED_SENSORS_EEPROM_ADDR, enabledSensors);
+      EEPROM.write(ENABLED_SENSORS_EEPROM_ADDR + 1, 255 ^ enabledSensors);
       actualScreen = MENU_SCREEN;
       screenPosition = POSITION_DEFAULT;
     } else {
@@ -255,15 +254,32 @@ void handleSetButton() {
     return;
   }
 
-  if (actualScreen == MENU_SENSOR_CALIBRATION_SCREEN()) {
-    actualScreen = SENSOR_CALIBRATION_SCREEN();
-    // don't set screenPosition because it will be used as sensor index
+  if (actualScreen == MENU_SENSORS_CALIBRATION_SCREEN) {
+    if (screenPosition == EXIT_SENSOR_CALIBRATION_MENU) {
+      actualScreen = MENU_SCREEN;
+      screenPosition = POSITION_DEFAULT;
+    } else {
+      actualScreen = SENSOR_CALIBRATION_SCREEN;
+      // don't set screenPosition because it will be used as sensor index
+    }
     return;
   }
 
-  if (actualScreen == SENSOR_CALIBRATION_SCREEN()) {
-    actualScreen = MENU_SCREEN;
-    screenPosition = POSITION_DEFAULT;
+  if (actualScreen == SENSOR_CALIBRATION_SCREEN) {
+    actualScreen = MENU_SENSORS_CALIBRATION_SCREEN;
+
+    EEPROM.put(MIN_MOISTURE_EEPROM_ADDR + (screenPosition * 2), moistureMin[screenPosition]);
+    EEPROM.put(MAX_MOISTURE_EEPROM_ADDR + (screenPosition * 2), moistureMax[screenPosition]);
+    int sumMin = 0;
+    int sumMax = 0;
+    for (byte i = 0; i < sizeof(moistureMin) / sizeof(int); i++) {
+      sumMin+=moistureMin[i];
+      sumMax+=moistureMax[i]; //MUST be same length to moistureMin !!!!
+    }
+    EEPROM.put(MIN_MOISTURE_EEPROM_ADDR + 12, sumMin);
+    EEPROM.put(MAX_MOISTURE_EEPROM_ADDR + 12, sumMax);
+    
+    // don't set screenPosition because it will be used as sensor index in menu
     return;
   }
 }
@@ -274,7 +290,7 @@ void handleUpButton() {
       screenPosition = MENU_EXIT_POSITION;
     } else {
       screenPosition--;
-      if (screenPosition == MENU_CALIBRATION_POSITION && enabledMoistureSensors == 192) { // 192 means that all sensors are turned off (defaul value 11000000)
+      if (screenPosition == MENU_SENSOR_CALIBRATION_POSITION && enabledSensors == 192) { // 192 means that all sensors are turned off (defaul value 11000000)
         screenPosition--; // skip calibration menu if no sensor enabled
       }
     }
@@ -331,27 +347,28 @@ void handleUpButton() {
     return;
   }
 
-  if (actualScreen == MOISTURE_ENABLE_SCREEN) {
-    enabledMoistureSensors = (enabledMoistureSensors ^ (1 << screenPosition)); // reverse bit on specified possition
+  if (actualScreen == SENSORS_ENABLE_SCREEN) {
+    enabledSensors = (enabledSensors ^ (1 << screenPosition)); // reverse bit on specified possition
     return;
   }
 
-  if (actualScreen == MENU_SENSOR_CALIBRATION_SCREEN()) {
+  if (actualScreen == MENU_SENSORS_CALIBRATION_SCREEN) {
     if (screenPosition == POSITION_DEFAULT) {
-      screenPosition = MOISTURE_SENSORS_MAX_COUNT - 1;
+      screenPosition = EXIT_SENSOR_CALIBRATION_MENU;
     } else {
       screenPosition--;
     }
-    byte count = 0;
-    while (bitRead(enabledMoistureSensors, screenPosition)==0) { // if disabled, jump to next enabled in same direction
+    while (screenPosition != EXIT_SENSOR_CALIBRATION_MENU && bitRead(enabledSensors, screenPosition)==0) { // if disabled, jump to next enabled in same direction, don't check for exit to menu idx
       screenPosition--;
-      if (screenPosition == POSITION_DEFAULT) {
-        screenPosition = MOISTURE_SENSORS_MAX_COUNT - 1;
-      }
-      if (count > MOISTURE_SENSORS_MAX_COUNT) {
-        break; // just to prevent infinite loop if some error  
+      if (screenPosition < POSITION_DEFAULT) {
+        screenPosition = EXIT_SENSOR_CALIBRATION_MENU;
       }
     }
+    return;
+  }
+
+  if (actualScreen == SENSOR_CALIBRATION_SCREEN) {
+    moistureMax[screenPosition] = measureRaw(screenPosition);
     return;
   }
 }
@@ -362,7 +379,7 @@ void handleDownButton() {
       screenPosition = POSITION_DEFAULT;
     } else {
       screenPosition++;
-      if (screenPosition == MENU_CALIBRATION_POSITION && enabledMoistureSensors == 192) { // 192 means that all sensors are turned off (defaul value 11000000)
+      if (screenPosition == MENU_SENSOR_CALIBRATION_POSITION && enabledSensors == 192) { // 192 means that all sensors are turned off (defaul value 11000000)
         screenPosition++; // skip calibration menu if no sensor enabled
       }
     }
@@ -419,28 +436,28 @@ void handleDownButton() {
     return;
   }
 
-  if (actualScreen == MOISTURE_ENABLE_SCREEN) {
-    enabledMoistureSensors = (enabledMoistureSensors ^ (1 << screenPosition)); // reverse bit on specified possition
+  if (actualScreen == SENSORS_ENABLE_SCREEN) {
+    enabledSensors = (enabledSensors ^ (1 << screenPosition)); // reverse bit on specified possition
     return;
   }
 
-  if (actualScreen == MENU_SENSOR_CALIBRATION_SCREEN()) {
-    if (screenPosition == MOISTURE_SENSORS_MAX_COUNT - 1) {
+  if (actualScreen == MENU_SENSORS_CALIBRATION_SCREEN) {
+    if (screenPosition == EXIT_SENSOR_CALIBRATION_MENU) {
       screenPosition = POSITION_DEFAULT;
     } else {
       screenPosition++;
     }
-    byte count = 0;
-    while (bitRead(enabledMoistureSensors, screenPosition)==0) { // if disabled, jump to next enabled in same direction
-      count++;
+    while (screenPosition != EXIT_SENSOR_CALIBRATION_MENU && bitRead(enabledSensors, screenPosition)==0) { // if disabled, jump to next enabled in same direction, don't check for exit to menu idx
       screenPosition++;
-      if (screenPosition == MOISTURE_SENSORS_MAX_COUNT - 1) {
+      if (screenPosition > EXIT_SENSOR_CALIBRATION_MENU) {
         screenPosition = POSITION_DEFAULT;
       }
-      if (count > MOISTURE_SENSORS_MAX_COUNT) {
-        break; // just to prevent infinite loop if some error  
-      }
     }
+    return;
+  }
+
+  if (actualScreen == SENSOR_CALIBRATION_SCREEN) {
+    moistureMin[screenPosition] = measureRaw(screenPosition);
     return;
   }
 }
@@ -525,17 +542,17 @@ void menuScreen() {
 
   oled.setRow(row++);
   oled.setCol(1);
-  if (screenPosition == MENU_MOISTURE_POSITION) {
+  if (screenPosition == MENU_SENSORS_ENABLE_POSITION) {
     oled.print("*");
   } else {
     oled.print(" ");
   }
-  oled.print("Povolenie senzorov");
+  oled.print("Zapnut senzory");
   oled.clearToEOL ();
 
   oled.setRow(row++);
   oled.setCol(1);
-  if (screenPosition == MENU_CALIBRATION_POSITION) {
+  if (screenPosition == MENU_SENSOR_CALIBRATION_POSITION) {
     oled.print("*");
   } else {
     oled.print(" ");
@@ -556,86 +573,55 @@ void menuScreen() {
 
 void mainScreen() {
   byte row = 1;
-  tempSensors.requestTemperatures(); // Send the command to get temperatures
+  tempSensor.requestTemperatures(); // Send the command to get temperatures
   now = rtc.now();
-  char actual_time[20];
-  sprintf(actual_time, "%02d:%02d %02d.%02d.%02d B%02d%%", now.hour(), now.minute(), now.date(), now.month(), (now.year() % 100), 99);
+  char line[21];
+  sprintf(line, "%02d:%02d %02d.%02d.%02d B%02d%%", now.hour(), now.minute(), now.date(), now.month(), (now.year() % 100), 99);
 
   oled.setRow(row++);
-  oled.setCol(3);
-  oled.print(actual_time);
+  oled.setCol(1);
+  oled.print(line);
   oled.clearToEOL ();
 
   row++;
   
   oled.setRow(row++);
   oled.setCol(1);
-  oled.print("Temperature: ");
-  oled.print(tempSensors.getTempCByIndex(0), 2);
+  oled.print("Teplota: ");
+  oled.print(tempSensor.getTempCByIndex(0), 2);
   oled.print("C");
   oled.clearToEOL ();
 
   row++;
   
+  char moisture[6][7];
+  for (byte i = 0; i<MAX_SUPPORTED_MOISTURE_SENSORS; i++) {
+    if (bitRead(enabledSensors, i)) {
+      byte value = measure(i);
+      sprintf(moisture[i], "V%1d:%3d", i + 1, measure(i));
+    } else {
+      sprintf(moisture[i], "V%1d:off", i + 1);
+    }
+  }
+
   oled.setRow(row++);
   oled.setCol(1);
-  oled.print("H1: ");
-  if (bitRead(enabledMoistureSensors, 0)) {
-    oled.print(measure(0), DEC);
-  } else {
-    oled.print("off");
-  }
-
-  oled.setCol(8);
-  oled.print("H2: ");
-  if (bitRead(enabledMoistureSensors, 1)) {
-    oled.print(measure(1), DEC);
-  } else {
-    oled.print("off");
-  }
-
-  oled.setCol(16);
-  oled.print("H3: ");
-  if (bitRead(enabledMoistureSensors, 2)) {
-    oled.print(measure(2), DEC);
-  } else {
-    oled.print("off");
-  }
-  
+  sprintf(line, "%s %s %s", moisture[0], moisture[1] ,moisture[2]);
+  oled.print(line);
   oled.clearToEOL ();
 
   oled.setRow(row++);
   oled.setCol(1);
-  oled.print("H4: ");
-  if (bitRead(enabledMoistureSensors, 3)) {
-    oled.print(measure(3), DEC);
-  } else {
-    oled.print("off");
-  }
-
-  oled.setCol(8);
-  oled.print("H5: ");
-  if (bitRead(enabledMoistureSensors, 4)) {
-    oled.print(measure(4), DEC);
-  } else {
-    oled.print("off");
-  }
-
-  oled.setCol(16);
-  oled.print("H6: ");
-  if (bitRead(enabledMoistureSensors, 5)) {
-    oled.print(measure(5), DEC);
-  } else {
-    oled.print("off");
-  }
-  
+  sprintf(line, "%s %s %s", moisture[3], moisture[4] ,moisture[5]);
+  oled.print(line);
   oled.clearToEOL ();
+  delay(500);
 }
 
-void moistureScreen() {
+void sensorsEnableScreen() {
   oled.setRow(1);
   oled.setCol(1);
-  oled.print("Povolenie senzorov");
+  oled.print("Zapnut senzory");
   oled.clearToEOL();      
   oled.setRow(3);
   oled.setCol(1);
@@ -643,13 +629,13 @@ void moistureScreen() {
   oled.clearToEOL();
   oled.setRow(4);
   oled.setCol(1);
-  for (byte i = 0; i < MOISTURE_SENSORS_MAX_COUNT; i++) {
+  for (byte i = 0; i < MAX_SUPPORTED_MOISTURE_SENSORS; i++) {
     if (screenPosition == i) {
       oled.print(">");
     } else {
       oled.print(" ");
     }
-    if (bitRead(enabledMoistureSensors, i)) {
+    if (bitRead(enabledSensors, i)) {
       oled.print("A");
     } else {
       oled.print("N");
@@ -659,13 +645,18 @@ void moistureScreen() {
   oled.clearToEOL();
 }
 
-void calibrationMenuScreen() {
+void sensorsCalibrationMenuScreen() {
   oled.setRow(1);
   oled.setCol(1);
+  if (screenPosition == EXIT_SENSOR_CALIBRATION_MENU) {
+    oled.print("<");
+  } else {
+    oled.print(" ");
+  }
   oled.print("Kalibracia senzorov");
   oled.clearToEOL();
 
-  for (byte i = 0; i < MOISTURE_SENSORS_MAX_COUNT; i++) {
+  for (byte i = 0; i < MAX_SUPPORTED_MOISTURE_SENSORS; i++) {
     oled.setRow(i + 2);
     oled.setCol(1);
     if (screenPosition == i) {
@@ -673,15 +664,21 @@ void calibrationMenuScreen() {
     } else {
       oled.print(" ");
     }
-
-    char line[21];
-    sprintf(line, "S%1d - od %3d do %3d", i+1, moistureMin[i], moistureMax[i]);
-    oled.print(line);
-    oled.clearToEOL();
+    if (bitRead(enabledSensors, i)) {
+      char line[21];
+      sprintf(line, "S%1d - od %3d do %3d", i+1, moistureMin[i], moistureMax[i]);
+      oled.print(line);
+      oled.clearToEOL();
+    } else {
+      oled.print("S");
+      oled.print(i+1);
+      oled.print(" off");
+      oled.clearToEOL();
+    }
   }
 }
 
-void calibrateSensorScreen() {
+void sensorCalibrationScreen() {
   oled.setRow(1);
   oled.setCol(1);
   oled.print("Kalibracia senzora ");
@@ -690,19 +687,19 @@ void calibrateSensorScreen() {
 
   oled.setRow(3);
   oled.setCol(1);
-  oled.print("Aktualna raw: ");
+  oled.print("Raw hodnota: ");
   oled.print(measureRaw(screenPosition));
   oled.clearToEOL();
 
   oled.setRow(5);
   oled.setCol(1);
-  oled.print("Ulozena min: ");
+  oled.print("Ulozena (min): ");
   oled.print(moistureMin[screenPosition]);
   oled.clearToEOL();
 
   oled.setRow(6);
   oled.setCol(1);
-  oled.print("Ulozena max: ");
+  oled.print("Ulozena (max): ");
   oled.print(moistureMax[screenPosition]);
   oled.clearToEOL();
 }
@@ -713,16 +710,16 @@ void calibrateSensorScreen() {
 
 int measureRaw(byte idx) {
   int soilHumidity = 0; // return lowest possible value, if error in code it will help to not watering all time  
-  if (bitRead(enabledMoistureSensors, idx)) {
+  if (bitRead(enabledSensors, idx)) {
     digitalWrite(MOISTURE_GROUP1_CONTROL, HIGH);
     digitalWrite(MOISTURE_GROUP2_CONTROL, HIGH);
 
     if (idx >= 0 && idx < 3) {
       digitalWrite(MOISTURE_GROUP1_CONTROL, LOW);
-      delay(50);
+      delay(150);
     } else if (idx >= 3 && idx <= 5) {
       digitalWrite(MOISTURE_GROUP2_CONTROL, LOW);
-      delay(50);
+      delay(150);
     }
     switch(idx) {
       case 0:
@@ -753,7 +750,7 @@ int measureRaw(byte idx) {
  
 byte measure(byte idx) {
   byte soilHumidity = 100; // return max humidity, help to prevent watering if mistake in code
-  if (bitRead(enabledMoistureSensors, idx)) {
+  if (bitRead(enabledSensors, idx)) {
     int raw = measureRaw(idx);
     raw = max(raw, moistureMin[idx]); // at least min calibrated value;
     raw = min(raw, moistureMax[idx]); // no more than max calibrated value; 
@@ -830,13 +827,41 @@ void loadEEPROMvariables() {
       break;
   }  
 
-  byte enabledMoistureSensorsByte = EEPROM.read(ENABLE_MOISTURE_EEPROM_ADDR);
-  byte enabledMoistureSensorsByteXor = EEPROM.read(ENABLE_MOISTURE_EEPROM_ADDR + 1);
+  byte enabledSensorsByte = EEPROM.read(ENABLED_SENSORS_EEPROM_ADDR);
+  byte enabledSensorsByteXor = EEPROM.read(ENABLED_SENSORS_EEPROM_ADDR + 1);
 
-  if ((255 ^ enabledMoistureSensorsByte) != enabledMoistureSensorsByteXor) { // if checksum (xor) value is not valid, set default
-    enabledMoistureSensorsByte = 0b11000000; // default turn off all sensors
+  if ((255 ^ enabledSensorsByte) != enabledSensorsByteXor) { // if checksum (xor) value is not valid, set default
+    enabledSensorsByte = 0b11000000; // default turn off all sensors
   }
-  enabledMoistureSensors = enabledMoistureSensorsByte;
+  enabledSensors = enabledSensorsByte;
+
+  int savedMinSum = 0;
+  int savedMaxSum = 0;
+  EEPROM.get(MIN_MOISTURE_EEPROM_ADDR, moistureMin);
+  EEPROM.get(MAX_MOISTURE_EEPROM_ADDR, moistureMax);
+  EEPROM.get(MIN_MOISTURE_EEPROM_ADDR + 12, savedMinSum);
+  EEPROM.get(MAX_MOISTURE_EEPROM_ADDR + 12, savedMaxSum);
+  int sumMin = 0;
+  int sumMax = 0;
+  for (byte i = 0; i < sizeof(moistureMin) / sizeof(int); i++) {
+    sumMin+=moistureMin[i];
+    sumMax+=moistureMax[i]; //MUST be same length to moistureMin !!!!
+  }
+  if (savedMinSum!=sumMin || savedMaxSum!=sumMax) {
+     // Error in stored data, set all to default and save it
+     sumMin = 0;
+     sumMax = 0;
+     for (byte i = 0; i < sizeof(moistureMin) / sizeof(int); i++) {
+       moistureMin[i]=0;
+       moistureMax[i]=1023;
+       sumMin+=moistureMin[i];
+       sumMax+=moistureMax[i];
+     }
+     EEPROM.put(MIN_MOISTURE_EEPROM_ADDR, moistureMin);
+     EEPROM.put(MAX_MOISTURE_EEPROM_ADDR, moistureMax);
+     EEPROM.put(MIN_MOISTURE_EEPROM_ADDR + 12, sumMin);
+     EEPROM.put(MAX_MOISTURE_EEPROM_ADDR + 12, sumMax);
+  }
 }
 
 void wakeUp() {
@@ -847,6 +872,8 @@ void wakeUp() {
     power_all_enable();
     ADCSRA |= (1 << ADEN); // wake up ADC
     interrupts();
+    oled.begin(&Adafruit128x64, I2C_OLED_ADDRESS);
+    oled.setFont(Adafruit5x7);
     oled.clear();
   }
 }
