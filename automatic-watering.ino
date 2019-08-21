@@ -10,7 +10,13 @@
 
 #define F_CPU 8000000L
 #define I2C_OLED_ADDRESS 0x3C
-#define ONE_WIRE_BUS_PIN 4
+#define ONE_WIRE_BUS_PIN 13
+
+#define BTN_INTERRUPT_PIN 3
+#define BTN_SET 8
+#define BTN_UP 7
+#define BTN_DOWN 2
+#define NO_BTN 0
 
 #define MOISTURE_SENSOR_1 A0 // group 1
 #define MOISTURE_SENSOR_2 A1 // group 1
@@ -19,10 +25,19 @@
 #define MOISTURE_SENSOR_5 A1 // group 2
 #define MOISTURE_SENSOR_6 A2 // group 2
 
-#define MOISTURE_GROUP1_CONTROL 10
-#define MOISTURE_GROUP2_CONTROL 6
+#define BATTERY_STATUS A3
 
-#define MAX_SUPPORTED_MOISTURE_SENSORS 6
+#define PUMP_1_PIN 12
+#define PUMP_2_PIN 11
+#define PUMP_3_PIN 10
+#define PUMP_4_PIN 9
+#define PUMP_5_PIN 5
+#define PUMP_6_PIN 6
+
+#define MOISTURE_GROUP1_CONTROL 4
+#define MOISTURE_GROUP2_CONTROL 1
+
+#define MAX_SUPPORTED_MOISTURE_SENSORS 6 // This is max limit for 3 groups of sensors by two sensors in group, there are used all pins for digital pins for pump control too
 #define EXIT_SENSOR_CALIBRATION_MENU MAX_SUPPORTED_MOISTURE_SENSORS
 
 #define MAIN_SCREEN 0
@@ -48,12 +63,6 @@
 #define TIME_MINUTE_POSITION 4
 
 #define SENSOR_ENABLE_POSITION POSITION_DEFAULT
-
-#define BTN_INTERRUPT_PIN 2
-#define BTN_SET 7
-#define BTN_UP 8
-#define BTN_DOWN 9
-#define NO_BTN 0
 
 #define SLEEP_EEPROM_ADDR 0
 #define ENABLED_SENSORS_EEPROM_ADDR 5
