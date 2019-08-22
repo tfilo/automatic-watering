@@ -13,6 +13,7 @@
 #define ONE_WIRE_BUS_PIN 13
 
 #define BTN_INTERRUPT_PIN 3
+#define RTC_INTERRUPT_PIN 2
 #define BTN_SET 8
 #define BTN_UP 7
 #define BTN_DOWN 2
@@ -37,8 +38,8 @@
 #define MOISTURE_GROUP1_CONTROL 4
 #define MOISTURE_GROUP2_CONTROL 1
 
-#define MAX_SUPPORTED_MOISTURE_SENSORS 6 // This is max limit for 3 groups of sensors by two sensors in group, there are used all pins for digital pins for pump control too
-#define EXIT_SENSOR_CALIBRATION_MENU MAX_SUPPORTED_MOISTURE_SENSORS
+#define MAX_SUPPORTED_POTS 6 // This is max limit for 3 groups of sensors by two sensors in group, there are used all pins for digital pins for pump control too
+#define EXIT_SENSOR_CALIBRATION_MENU MAX_SUPPORTED_POTS
 
 #define MAIN_SCREEN 0
 #define MENU_SCREEN 1
@@ -82,20 +83,30 @@ unsigned char setDay = 1;
 unsigned char setHour = 0;
 unsigned char setMinute = 0;
 
-bool sleeping = true;
 unsigned int sleepAfter;
+
+boolean initialWatering = true;
 
 byte enabledSensors; // up to 6 sensors (0-5), ignore bit 6 and 7 (0 == false)
 int moistureMin[] = {0, 0, 0, 0, 0, 0};
 int moistureMax[] = {1023, 1023, 1023, 1023, 1023, 1023};
+
+bool markedPot[] = {false, false, false, false, false, false};
  
 DateTime now;
 OneWire oneWire(ONE_WIRE_BUS_PIN);
 DallasTemperature tempSensor(&oneWire);
 SSD1306AsciiAvrI2c oled;
 
+#define SLEEP 0
+#define WAKED_BY_USER 1
+#define WAKED_BY_RTC 2
+
+byte status = WAKED_BY_USER; // default jump to user mode
+
 void setup(void)
 {
+  analogReference(INTERNAL);
   pinMode(MOISTURE_GROUP1_CONTROL, OUTPUT);
   pinMode(MOISTURE_GROUP2_CONTROL, OUTPUT);
   digitalWrite(MOISTURE_GROUP1_CONTROL, HIGH); // keep sensors turned off
@@ -106,8 +117,9 @@ void setup(void)
   oled.setFont(Adafruit5x7);
   oled.clear();
   
-  setupAsInterrupt();
+  setupButtons();
   attachInterrupt(digitalPinToInterrupt(BTN_INTERRUPT_PIN), pressInterrupt, FALLING);
+  attachInterrupt(digitalPinToInterrupt(RTC_INTERRUPT_PIN), rtcInterrupt, FALLING);
   loadEEPROMvariables();
 }
 
@@ -116,46 +128,67 @@ void loop(void)
   unsigned char btn = lastButton;
   lastButton = NO_BTN;
 
-  switch (btn) {
-    case BTN_SET:
-      handleSetButton();
-      break;
-    case BTN_UP:
-      handleUpButton();
-      break;
-    case BTN_DOWN:
-      handleDownButton();
-      break;
-  }
+  if (status==WAKED_BY_USER) {
+    switch (btn) {
+      case BTN_SET:
+        handleSetButton();
+        break;
+      case BTN_UP:
+        handleUpButton();
+        break;
+      case BTN_DOWN:
+        handleDownButton();
+        break;
+    }
 
-  switch (actualScreen) {
-    case MAIN_SCREEN:
-      mainScreen();
-      break;
-    case MENU_SCREEN:
-      menuScreen();
-      break;
-    case TIME_SETUP_SCREEN:
-      timeScreen();
-      break;
-    case SLEEP_SETUP_SCREEN:
-      sleepScreen();
-      break;
-    case SENSORS_ENABLE_SCREEN:
-      sensorsEnableScreen();
-      break;
-    case MENU_SENSORS_CALIBRATION_SCREEN:
-      sensorsCalibrationMenuScreen();
-      break;
-    case SENSOR_CALIBRATION_SCREEN:
-      sensorCalibrationScreen();
-      break;
-  }
+    switch (actualScreen) {
+      case MAIN_SCREEN:
+        mainScreen();
+        break;
+      case MENU_SCREEN:
+        menuScreen();
+        break;
+      case TIME_SETUP_SCREEN:
+        timeScreen();
+        break;
+      case SLEEP_SETUP_SCREEN:
+        sleepScreen();
+        break;
+      case SENSORS_ENABLE_SCREEN:
+        sensorsEnableScreen();
+        break;
+      case MENU_SENSORS_CALIBRATION_SCREEN:
+        sensorsCalibrationMenuScreen();
+        break;
+      case SENSOR_CALIBRATION_SCREEN:
+        sensorCalibrationScreen();
+        break;
+    }
 
-  if (millis() - lastBtnPress > sleepAfter) {
-    putToSleep();
-  } else {
-    delay(100);
+    if (millis() - lastBtnPress > sleepAfter) {
+      putToSleep();
+    } else {
+      delay(100);
+    }
+  } else if (status==WAKED_BY_RTC) {
+    wateringScreen();
+
+    if (btn!=0) { // STOP with any button
+      for (int i=0; i<MAX_SUPPORTED_POTS; i++) {
+        markedPot[i] = false;
+      }
+      putToSleep();
+    }
+    
+    if (initialWatering) {
+      initialWatering = false;
+      // TODO Check every pot and if value (%) is lower than specified mark pot for watering
+    } else {
+      // Print to screen that system is checking pots. Check every marked pot if value is higher than specified, if true is watered and unmark this pot
+      // Water every marked pot for 5 seconds, ONE by ONE !!!
+      // if no pot marked anymore, than putToSleep() else delay(30000L);
+      delay(30000L);
+    }
   }
 }
 
@@ -252,7 +285,7 @@ void handleSetButton() {
   }
 
   if (actualScreen == SENSORS_ENABLE_SCREEN) {
-    if (screenPosition >= MAX_SUPPORTED_MOISTURE_SENSORS - 1) {
+    if (screenPosition >= MAX_SUPPORTED_POTS - 1) {
       EEPROM.write(ENABLED_SENSORS_EEPROM_ADDR, enabledSensors);
       EEPROM.write(ENABLED_SENSORS_EEPROM_ADDR + 1, 255 ^ enabledSensors);
       actualScreen = MENU_SCREEN;
@@ -582,10 +615,14 @@ void menuScreen() {
 
 void mainScreen() {
   byte row = 1;
+
+  float batteryInput = analogRead(BATTERY_STATUS) * (1.1 / 1023.0);
+  float batteryVoltage = (batteryInput * 1220.0) / 220.0;
+  
   tempSensor.requestTemperatures(); // Send the command to get temperatures
   now = rtc.now();
   char line[21];
-  sprintf(line, "%02d:%02d %02d.%02d.%02d B%02d%%", now.hour(), now.minute(), now.date(), now.month(), (now.year() % 100), 99);
+  sprintf(line, "%02d:%02d %02d.%02d.%02d B%.1fV", now.hour(), now.minute(), now.date(), now.month(), (now.year() % 100), batteryVoltage);
 
   oled.setRow(row++);
   oled.setCol(1);
@@ -604,7 +641,7 @@ void mainScreen() {
   row++;
   
   char moisture[6][7];
-  for (byte i = 0; i<MAX_SUPPORTED_MOISTURE_SENSORS; i++) {
+  for (byte i = 0; i<MAX_SUPPORTED_POTS; i++) {
     if (bitRead(enabledSensors, i)) {
       byte value = measure(i);
       sprintf(moisture[i], "V%1d:%3d", i + 1, measure(i));
@@ -638,7 +675,7 @@ void sensorsEnableScreen() {
   oled.clearToEOL();
   oled.setRow(4);
   oled.setCol(1);
-  for (byte i = 0; i < MAX_SUPPORTED_MOISTURE_SENSORS; i++) {
+  for (byte i = 0; i < MAX_SUPPORTED_POTS; i++) {
     if (screenPosition == i) {
       oled.print(">");
     } else {
@@ -665,7 +702,7 @@ void sensorsCalibrationMenuScreen() {
   oled.print("Kalibracia senzorov");
   oled.clearToEOL();
 
-  for (byte i = 0; i < MAX_SUPPORTED_MOISTURE_SENSORS; i++) {
+  for (byte i = 0; i < MAX_SUPPORTED_POTS; i++) {
     oled.setRow(i + 2);
     oled.setCol(1);
     if (screenPosition == i) {
@@ -713,9 +750,73 @@ void sensorCalibrationScreen() {
   oled.clearToEOL();
 }
 
+void wateringScreen() {
+  float batteryInput = analogRead(BATTERY_STATUS) * (1.1 / 1023.0);
+  float batteryVoltage = (batteryInput * 1220.0) / 220.0;
+  tempSensor.requestTemperatures(); // Send the command to get temperatures
+  now = rtc.now();
+  char line[21];
+  sprintf(line, "%02d:%02d %02d.%02d.%02d B%.1fV", now.hour(), now.minute(), now.date(), now.month(), (now.year() % 100), batteryVoltage);
+  oled.println(line);
+  oled.clearToEOL ();
+  oled.set2X();
+  oled.println(" Polievam ");
+  oled.set1X();
+  oled.clearToEOL ();
+  oled.println("Prerusit lubovolnym");
+  oled.println("tlacitkom");
+}
+
 /************
  * HARDWARE *
  ************/
+
+void setNextRTCInterrupt() {
+  DateTime now = rtc.now();
+  /* FOR production
+  if (now.hour() < 10) { // if before 10:00 set next Interrupt to 10:00
+    rtc.enableInterrupts(10,00,0);
+  } else {
+    rtc.enableInterrupts(20,00,0); // if after 10:00 set next Interrupt to 20:00 
+  }*/
+  // FOR TESTING
+  if (now.hour() < 9) {
+    rtc.enableInterrupts(9,00,0);
+  } else if (now.hour() < 10) {
+    rtc.enableInterrupts(10,00,0);
+  } else if (now.hour() < 11) {
+    rtc.enableInterrupts(11,00,0);
+  } else if (now.hour() < 12) {
+    rtc.enableInterrupts(12,00,0);
+  } else if (now.hour() < 13) {
+    rtc.enableInterrupts(13,00,0);
+  } else if (now.hour() < 14) {
+    rtc.enableInterrupts(14,00,0);
+  } else if (now.hour() < 15) {
+    rtc.enableInterrupts(15,00,0);
+  } else {
+    rtc.enableInterrupts(8,00,0);
+  }
+}
+
+void postponeRTCInterrupt() {
+  DateTime now = rtc.now();
+
+  uint8_t hour = now.hour();
+  uint8_t minute = now.minute();
+  if (minute < 55) {
+    minute += 5;  
+  } else {
+    minute = 0;
+    if (hour < 23) {
+      hour++;  
+    } else {
+      hour = 0;  
+    }
+  }
+  
+  rtc.enableInterrupts(hour,minute,0);
+}
 
 int measureRaw(byte idx) {
   int soilHumidity = 0; // return lowest possible value, if error in code it will help to not watering all time  
@@ -767,16 +868,29 @@ byte measure(byte idx) {
   } 
   return soilHumidity;
 }
+
+void rtcInterrupt() {
+  if (status==WAKED_BY_USER) {
+    // if user is working in menu, try after 5 minute
+    postponeRTCInterrupt();
+  } else {
+    status = WAKED_BY_RTC;
+    initialWatering = true;
+    setNextRTCInterrupt();
+  }
+}
  
 void pressInterrupt() {
+  if (status==WAKED_BY_RTC) {
+    // If waked by RTC than don't change status, but track buttons, any button will stop/prevent watering
+  } else {
+    status = WAKED_BY_USER;
+  }
   if (millis() - lastBtnPress < 300) { // Debounce 300ms
     return;
   }
-  wakeUp();
 
   lastBtnPress = millis();
-
-  setupAsButtons();
 
   // test for pressed button
   if (!digitalRead(BTN_SET)) {
@@ -788,26 +902,13 @@ void pressInterrupt() {
   if (!digitalRead(BTN_DOWN)) {
     lastButton = BTN_DOWN;
   }
-
-  setupAsInterrupt();
 }
 
-void setupAsInterrupt() {
-  pinMode(BTN_INTERRUPT_PIN, INPUT_PULLUP);
-  pinMode(BTN_SET, OUTPUT);
-  digitalWrite(BTN_SET, LOW);
-  pinMode(BTN_UP, OUTPUT);
-  digitalWrite(BTN_UP, LOW);
-  pinMode(BTN_DOWN, OUTPUT);
-  digitalWrite(BTN_DOWN, LOW);
-}
-
-void setupAsButtons() {
+void setupButtons() {
   pinMode(BTN_SET, INPUT_PULLUP);
   pinMode(BTN_UP, INPUT_PULLUP);
   pinMode(BTN_DOWN, INPUT_PULLUP);
-  pinMode(BTN_INTERRUPT_PIN, OUTPUT);
-  digitalWrite(BTN_INTERRUPT_PIN, LOW);
+  pinMode(BTN_INTERRUPT_PIN, INPUT_PULLUP);
 }
 
 void loadEEPROMvariables() {
@@ -874,30 +975,30 @@ void loadEEPROMvariables() {
 }
 
 void wakeUp() {
-  if (sleeping) {
-    noInterrupts();
-    sleeping = false;
-    sleep_disable();
-    power_all_enable();
-    ADCSRA |= (1 << ADEN); // wake up ADC
-    interrupts();
-    oled.begin(&Adafruit128x64, I2C_OLED_ADDRESS);
-    oled.setFont(Adafruit5x7);
-    oled.clear();
-  }
+  lastButton = NO_BTN; // after waking up by any button don't do action assignet to button
+  noInterrupts();
+  sleep_disable();
+  power_all_enable();
+  ADCSRA |= (1 << ADEN); // wake up ADC
+  interrupts();
+  // analogReference(INTERNAL); // TODO only if makes higher consuption during sleep
+  oled.begin(&Adafruit128x64, I2C_OLED_ADDRESS);
+  oled.setFont(Adafruit5x7);
+  oled.clear();
 }
 
 void putToSleep() {
   noInterrupts();
-  digitalWrite(MOISTURE_GROUP1_CONTROL, HIGH); // turn off group1 of capacitive soil moisture sensors v1.2 using P-Channel MOSFET BS250, save around 15mA
-  digitalWrite(MOISTURE_GROUP2_CONTROL, HIGH); // turn off group2 of capacitive soil moisture sensors v1.2 using P-Channel MOSFET BS250, save around 15mA
+  digitalWrite(MOISTURE_GROUP1_CONTROL, HIGH); // turn off group1 of capacitive soil moisture sensors v1.2 using PNP S8550, save around 15mA
+  digitalWrite(MOISTURE_GROUP2_CONTROL, HIGH); // turn off group2 of capacitive soil moisture sensors v1.2 using PNP S8550, save around 15mA
   oled.ssd1306WriteCmd(0xAE); // turn off oled
+  // analogReference(EXTERNAL); // TODO only if makes higher consuption during sleep
   set_sleep_mode(SLEEP_MODE_PWR_DOWN); // set powerdown state for ATmega
   ADCSRA = 0; // put ADC to sleep, save around 0.250mA
   power_all_disable(); // put everything other to sleep
   sleep_enable();
-  sleeping = true;
   interrupts();
+  status = SLEEP;
   sleep_cpu(); // When sleeping current goes down to 0.035mA
-  lastButton = NO_BTN; // after waking up by any button don't do action assignet to button
+  wakeUp();
 }
