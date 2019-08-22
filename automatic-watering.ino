@@ -16,8 +16,8 @@
 #define RTC_INTERRUPT_PIN 2
 #define BTN_SET 8
 #define BTN_UP 7
-#define BTN_DOWN 2
-#define NO_BTN 0
+#define BTN_DOWN 0
+#define NO_BTN 99 //dummy value
 
 #define MOISTURE_SENSOR_1 A0 // group 1
 #define MOISTURE_SENSOR_2 A1 // group 1
@@ -616,13 +616,13 @@ void menuScreen() {
 void mainScreen() {
   byte row = 1;
 
-  float batteryInput = analogRead(BATTERY_STATUS) * (1.1 / 1023.0);
-  float batteryVoltage = (batteryInput * 1220.0) / 220.0;
+  float batteryInput = analogRead(BATTERY_STATUS) * (1.12 / 1023.0);
+  int batteryVoltage = round(((batteryInput * 1232.0) / 221.0)*1000);
   
   tempSensor.requestTemperatures(); // Send the command to get temperatures
   now = rtc.now();
-  char line[21];
-  sprintf(line, "%02d:%02d %02d.%02d.%02d B%.1fV", now.hour(), now.minute(), now.date(), now.month(), (now.year() % 100), batteryVoltage);
+  char line[22];
+  sprintf(line, "%02d:%02d %02d.%02d.%02d %04dmV", now.hour(), now.minute(), now.date(), now.month(), (now.year() % 100), batteryVoltage);
 
   oled.setRow(row++);
   oled.setCol(1);
@@ -751,12 +751,12 @@ void sensorCalibrationScreen() {
 }
 
 void wateringScreen() {
-  float batteryInput = analogRead(BATTERY_STATUS) * (1.1 / 1023.0);
-  float batteryVoltage = (batteryInput * 1220.0) / 220.0;
+  float batteryInput = analogRead(BATTERY_STATUS) * (1.12 / 1023.0);
+  int batteryVoltage = round(((batteryInput * 1232.0) / 221.0)*1000);
   tempSensor.requestTemperatures(); // Send the command to get temperatures
   now = rtc.now();
-  char line[21];
-  sprintf(line, "%02d:%02d %02d.%02d.%02d B%.1fV", now.hour(), now.minute(), now.date(), now.month(), (now.year() % 100), batteryVoltage);
+  char line[22];
+  sprintf(line, "%02d:%02d %02d.%02d.%02d %04dmV", now.hour(), now.minute(), now.date(), now.month(), (now.year() % 100), batteryVoltage);
   oled.println(line);
   oled.clearToEOL ();
   oled.set2X();
