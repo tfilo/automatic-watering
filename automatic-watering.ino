@@ -88,10 +88,13 @@ unsigned int sleepAfter;
 boolean initialWatering = true;
 
 byte enabledSensors; // up to 6 sensors (0-5), ignore bit 6 and 7 (0 == false)
+byte enabledPots; // up to 6 pots (0-5), ignore bit 6 and 7 (0 == false), allow enable only pots with sensor
 int moistureMin[] = {0, 0, 0, 0, 0, 0};
 int moistureMax[] = {1023, 1023, 1023, 1023, 1023, 1023};
 
 bool markedPot[] = {false, false, false, false, false, false};
+byte potMin[] = {3,3,3,3,3,3}; // this is calibrated value 0 - 10 , 0 is dry, 10 is max wet (water), number when to mark pot for watering
+byte potMax[] = {6,6,6,6,6,6}; // this is calibrated value 0 - 10, value when to mark pot as watered
  
 DateTime now;
 OneWire oneWire(ONE_WIRE_BUS_PIN);
@@ -173,21 +176,46 @@ void loop(void)
   } else if (status==WAKED_BY_RTC) {
     wateringScreen();
 
-    if (btn!=0) { // STOP with any button
+    if (btn!=NO_BTN) { // STOP with any button
       for (int i=0; i<MAX_SUPPORTED_POTS; i++) {
         markedPot[i] = false;
       }
       putToSleep();
-    }
-    
-    if (initialWatering) {
-      initialWatering = false;
-      // TODO Check every pot and if value (%) is lower than specified mark pot for watering
     } else {
-      // Print to screen that system is checking pots. Check every marked pot if value is higher than specified, if true is watered and unmark this pot
-      // Water every marked pot for 5 seconds, ONE by ONE !!!
-      // if no pot marked anymore, than putToSleep() else delay(30000L);
-      delay(30000L);
+      if (initialWatering) {
+        initialWatering = false;
+        for (int i=0; i<MAX_SUPPORTED_POTS; i++) {
+          if (bitRead(enabledPots, i)==1 && bitRead(enabledSensors, i)==1) { // check only enabled pots with enabled sensors
+            byte value = measure(i);
+            if (value <= potMin[i]) {
+              markedPot[i] = true; // need watering
+            } else {
+              markedPot[i] = false;
+            }
+          }
+        }
+      } else {
+        for (int i=0; i<MAX_SUPPORTED_POTS; i++) {
+          if (markedPot[i] == true) {
+            byte value = measure(i);
+            if (value >= potMax[i]) {
+              markedPot[i] = false; // watered enough
+            }
+          }
+        }
+        bool anyForWatering = false;
+        for (int i=0; i<MAX_SUPPORTED_POTS; i++) {
+          if (markedPot[i] == true) {
+            anyForWatering = true;
+            // TODO water pot for 5 seconds !!!  
+          }
+        }
+        if (anyForWatering) {
+          delay(30000L);
+        } else {
+          putToSleep();  
+        }
+      }
     }
   }
 }
@@ -644,7 +672,7 @@ void mainScreen() {
   for (byte i = 0; i<MAX_SUPPORTED_POTS; i++) {
     if (bitRead(enabledSensors, i)) {
       byte value = measure(i);
-      sprintf(moisture[i], "V%1d:%3d", i + 1, measure(i));
+      sprintf(moisture[i], "V%1d: %2d", i + 1, measure(i));
     } else {
       sprintf(moisture[i], "V%1d:off", i + 1);
     }
@@ -753,7 +781,6 @@ void sensorCalibrationScreen() {
 void wateringScreen() {
   float batteryInput = analogRead(BATTERY_STATUS) * (1.12 / 1023.0);
   int batteryVoltage = round(((batteryInput * 1232.0) / 221.0)*1000);
-  tempSensor.requestTemperatures(); // Send the command to get temperatures
   now = rtc.now();
   char line[22];
   sprintf(line, "%02d:%02d %02d.%02d.%02d %04dmV", now.hour(), now.minute(), now.date(), now.month(), (now.year() % 100), batteryVoltage);
@@ -864,7 +891,7 @@ byte measure(byte idx) {
     int raw = measureRaw(idx);
     raw = max(raw, moistureMin[idx]); // at least min calibrated value;
     raw = min(raw, moistureMax[idx]); // no more than max calibrated value; 
-    soilHumidity = map(raw, moistureMin[idx], moistureMax[idx], 100, 0); // change moisture analog value to 0 - 100
+    soilHumidity = map(raw, moistureMin[idx], moistureMax[idx], 10, 0); // change moisture analog value to 0 - 10
   } 
   return soilHumidity;
 }
