@@ -47,6 +47,7 @@
 #define SLEEP_SETUP_SCREEN 3
 #define SENSORS_ENABLE_SCREEN 4
 #define MENU_SENSORS_CALIBRATION_SCREEN 5
+#define POTS_ENABLE_SCREEN 6
 
 #define SENSOR_CALIBRATION_SCREEN 10
 
@@ -55,7 +56,8 @@
 #define MENU_SLEEP_POSITION 1
 #define MENU_SENSORS_ENABLE_POSITION 2
 #define MENU_SENSOR_CALIBRATION_POSITION 3
-#define MENU_EXIT_POSITION 4
+#define MENU_POTS_ENABLE_POSITION 4
+#define MENU_EXIT_POSITION 5
 
 #define TIME_YEAR_POSITION POSITION_DEFAULT
 #define TIME_MONTH_POSITION 1
@@ -67,6 +69,7 @@
 
 #define SLEEP_EEPROM_ADDR 0
 #define ENABLED_SENSORS_EEPROM_ADDR 5
+#define ENABLED_POTS_EEPROM_ADDR 7
 #define MIN_MOISTURE_EEPROM_ADDR 10
 #define MAX_MOISTURE_EEPROM_ADDR 30
 
@@ -166,6 +169,8 @@ void loop(void)
       case SENSOR_CALIBRATION_SCREEN:
         sensorCalibrationScreen();
         break;
+      case POTS_ENABLE_SCREEN:
+        potsEnableScreen();
     }
 
     if (millis() - lastBtnPress > sleepAfter) {
@@ -260,6 +265,10 @@ void handleSetButton() {
           screenPosition++;
         }
         break;
+      case MENU_POTS_ENABLE_POSITION:
+        actualScreen = POTS_ENABLE_SCREEN;
+        screenPosition = POSITION_DEFAULT;
+        break;
       case MENU_EXIT_POSITION:
         actualScreen = MAIN_SCREEN;
         screenPosition = POSITION_DEFAULT;
@@ -316,6 +325,18 @@ void handleSetButton() {
     if (screenPosition >= MAX_SUPPORTED_POTS - 1) {
       EEPROM.write(ENABLED_SENSORS_EEPROM_ADDR, enabledSensors);
       EEPROM.write(ENABLED_SENSORS_EEPROM_ADDR + 1, 255 ^ enabledSensors);
+      actualScreen = MENU_SCREEN;
+      screenPosition = POSITION_DEFAULT;
+    } else {
+      screenPosition++;  
+    } 
+    return;
+  }
+  
+  if (actualScreen == POTS_ENABLE_SCREEN) {
+    if (screenPosition >= MAX_SUPPORTED_POTS - 1) {
+      EEPROM.write(ENABLED_POTS_EEPROM_ADDR, enabledPots);
+      EEPROM.write(ENABLED_POTS_EEPROM_ADDR + 1, 255 ^ enabledPots);
       actualScreen = MENU_SCREEN;
       screenPosition = POSITION_DEFAULT;
     } else {
@@ -422,6 +443,11 @@ void handleUpButton() {
     return;
   }
 
+  if (actualScreen == POTS_ENABLE_SCREEN) {
+    enabledPots = (enabledPots ^ (1 << screenPosition)); // reverse bit on specified possition
+    return;
+  }
+
   if (actualScreen == MENU_SENSORS_CALIBRATION_SCREEN) {
     if (screenPosition == POSITION_DEFAULT) {
       screenPosition = EXIT_SENSOR_CALIBRATION_MENU;
@@ -508,6 +534,11 @@ void handleDownButton() {
 
   if (actualScreen == SENSORS_ENABLE_SCREEN) {
     enabledSensors = (enabledSensors ^ (1 << screenPosition)); // reverse bit on specified possition
+    return;
+  }
+
+  if (actualScreen == POTS_ENABLE_SCREEN) {
+    enabledPots = (enabledPots ^ (1 << screenPosition)); // reverse bit on specified possition
     return;
   }
 
@@ -632,6 +663,16 @@ void menuScreen() {
 
   oled.setRow(row++);
   oled.setCol(1);
+  if (screenPosition == MENU_POTS_ENABLE_POSITION) {
+    oled.print("*");
+  } else {
+    oled.print(" ");
+  }
+  oled.print("Zapnut polievanie");
+  oled.clearToEOL ();
+
+  oled.setRow(row++);
+  oled.setCol(1);
   if (screenPosition == MENU_EXIT_POSITION) {
     oled.print("*");
   } else {
@@ -710,6 +751,33 @@ void sensorsEnableScreen() {
       oled.print(" ");
     }
     if (bitRead(enabledSensors, i)) {
+      oled.print("A");
+    } else {
+      oled.print("N");
+    }
+      oled.print(" ");
+    }
+  oled.clearToEOL();
+}
+
+void potsEnableScreen() {
+  oled.setRow(1);
+  oled.setCol(1);
+  oled.print("Zapnut polievanie");
+  oled.clearToEOL();      
+  oled.setRow(3);
+  oled.setCol(1);
+  oled.print(" 1  2  3  4  5  6");
+  oled.clearToEOL();
+  oled.setRow(4);
+  oled.setCol(1);
+  for (byte i = 0; i < MAX_SUPPORTED_POTS; i++) {
+    if (screenPosition == i) {
+      oled.print(">");
+    } else {
+      oled.print(" ");
+    }
+    if (bitRead(enabledPots, i)) {
       oled.print("A");
     } else {
       oled.print("N");
@@ -972,6 +1040,15 @@ void loadEEPROMvariables() {
   }
   enabledSensors = enabledSensorsByte;
 
+
+  byte enabledPotsByte = EEPROM.read(ENABLED_POTS_EEPROM_ADDR);
+  byte enabledPotsByteXor = EEPROM.read(ENABLED_POTS_EEPROM_ADDR + 1);
+
+  if ((255 ^ enabledPotsByte) != enabledPotsByteXor) { // if checksum (xor) value is not valid, set default
+    enabledPotsByte = 0b11000000; // default turn off all pots
+  }
+  enabledPots = enabledPotsByte;
+  
   int savedMinSum = 0;
   int savedMaxSum = 0;
   EEPROM.get(MIN_MOISTURE_EEPROM_ADDR, moistureMin);
