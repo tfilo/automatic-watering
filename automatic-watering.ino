@@ -40,6 +40,7 @@
 
 #define MAX_SUPPORTED_POTS 6 // This is max limit for 3 groups of sensors by two sensors in group, there are used all pins for digital pins for pump control too
 #define EXIT_SENSOR_CALIBRATION_MENU MAX_SUPPORTED_POTS
+#define EXIT_POT_CALIBRATION_MENU MAX_SUPPORTED_POTS
 
 #define MAIN_SCREEN 0
 #define MENU_SCREEN 1
@@ -48,8 +49,10 @@
 #define SENSORS_ENABLE_SCREEN 4
 #define MENU_SENSORS_CALIBRATION_SCREEN 5
 #define POTS_ENABLE_SCREEN 6
+#define MENU_POTS_CALIBRATION_SCREEN 7
 
 #define SENSOR_CALIBRATION_SCREEN 10
+#define POT_CALIBRATION_SCREEN 11
 
 #define POSITION_DEFAULT 0
 #define MENU_TIME_POSITION POSITION_DEFAULT
@@ -57,7 +60,8 @@
 #define MENU_SENSORS_ENABLE_POSITION 2
 #define MENU_SENSOR_CALIBRATION_POSITION 3
 #define MENU_POTS_ENABLE_POSITION 4
-#define MENU_EXIT_POSITION 5
+#define MENU_POT_CALIBRATION_POSITION 5
+#define MENU_EXIT_POSITION 6
 
 #define TIME_YEAR_POSITION POSITION_DEFAULT
 #define TIME_MONTH_POSITION 1
@@ -72,6 +76,8 @@
 #define ENABLED_POTS_EEPROM_ADDR 7
 #define MIN_MOISTURE_EEPROM_ADDR 10
 #define MAX_MOISTURE_EEPROM_ADDR 30
+#define MIN_POT_EEPROM_ADDR 50
+#define MAX_POT_EEPROM_ADDR 60
 
 const char daysInMonth[] = {31,28,31,30,31,30,31,31,30,31,30,31};
 unsigned long lastBtnPress = 0; // time in ms
@@ -91,7 +97,7 @@ unsigned int sleepAfter;
 boolean initialWatering = true;
 
 byte enabledSensors; // up to 6 sensors (0-5), ignore bit 6 and 7 (0 == false)
-byte enabledPots; // up to 6 pots (0-5), ignore bit 6 and 7 (0 == false), allow enable only pots with sensor
+byte enabledPots; // up to 6 pots (0-5), ignore bit 6 and 7 (0 == false), watering done only if pot and sensor enabled in same time
 int moistureMin[] = {0, 0, 0, 0, 0, 0};
 int moistureMax[] = {1023, 1023, 1023, 1023, 1023, 1023};
 
@@ -171,6 +177,13 @@ void loop(void)
         break;
       case POTS_ENABLE_SCREEN:
         potsEnableScreen();
+        break;
+      case MENU_POTS_CALIBRATION_SCREEN:
+        potsCalibrationMenuScreen();
+        break;
+      case POT_CALIBRATION_SCREEN:
+        potCalibrationScreen();
+        break;
     }
 
     if (millis() - lastBtnPress > sleepAfter) {
@@ -269,6 +282,13 @@ void handleSetButton() {
         actualScreen = POTS_ENABLE_SCREEN;
         screenPosition = POSITION_DEFAULT;
         break;
+      case MENU_POT_CALIBRATION_POSITION:
+        actualScreen = MENU_POTS_CALIBRATION_SCREEN;
+        screenPosition = POSITION_DEFAULT;
+        while (screenPosition != EXIT_POT_CALIBRATION_MENU && bitRead(enabledPots, screenPosition)==0) { // if disabled, jump to next enabled in same direction
+          screenPosition++;
+        }
+        break;  
       case MENU_EXIT_POSITION:
         actualScreen = MAIN_SCREEN;
         screenPosition = POSITION_DEFAULT;
@@ -356,6 +376,17 @@ void handleSetButton() {
     return;
   }
 
+  if (actualScreen == MENU_POTS_CALIBRATION_SCREEN) {
+    if (screenPosition == EXIT_POT_CALIBRATION_MENU) {
+      actualScreen = MENU_SCREEN;
+      screenPosition = POSITION_DEFAULT;
+    } else {
+      actualScreen = POT_CALIBRATION_SCREEN;
+      // don't set screenPosition because it will be used as pot index
+    }
+    return;
+  }
+
   if (actualScreen == SENSOR_CALIBRATION_SCREEN) {
     actualScreen = MENU_SENSORS_CALIBRATION_SCREEN;
 
@@ -373,6 +404,24 @@ void handleSetButton() {
     // don't set screenPosition because it will be used as sensor index in menu
     return;
   }
+
+  if (actualScreen == POT_CALIBRATION_SCREEN) {
+    actualScreen = MENU_POTS_CALIBRATION_SCREEN;
+
+    EEPROM.put(MIN_POT_EEPROM_ADDR + (screenPosition), potMin[screenPosition]);
+    EEPROM.put(MAX_POT_EEPROM_ADDR + (screenPosition), potMax[screenPosition]);
+    int sumMin = 0;
+    int sumMax = 0;
+    for (byte i = 0; i < sizeof(potMin); i++) {
+      sumMin+=potMin[i];
+      sumMax+=potMax[i]; //MUST be same length to potMin !!!!
+    }
+    EEPROM.put(MIN_POT_EEPROM_ADDR + 6, sumMin);
+    EEPROM.put(MAX_POT_EEPROM_ADDR + 6, sumMax);
+    
+    // don't set screenPosition because it will be used as sensor index in menu
+    return;
+  }
 }
 
 void handleUpButton() {
@@ -383,6 +432,9 @@ void handleUpButton() {
       screenPosition--;
       if (screenPosition == MENU_SENSOR_CALIBRATION_POSITION && enabledSensors == 192) { // 192 means that all sensors are turned off (defaul value 11000000)
         screenPosition--; // skip calibration menu if no sensor enabled
+      }
+      if (screenPosition == MENU_POT_CALIBRATION_POSITION && enabledPots == 192) { // 192 means that all pots are turned off (defaul value 11000000)
+        screenPosition--; // skip calibration menu if no pot enabled
       }
     }
     return;
@@ -465,6 +517,30 @@ void handleUpButton() {
 
   if (actualScreen == SENSOR_CALIBRATION_SCREEN) {
     moistureMax[screenPosition] = measureRaw(screenPosition);
+    return;
+  }
+
+  if (actualScreen == MENU_POTS_CALIBRATION_SCREEN) {
+    if (screenPosition == POSITION_DEFAULT) {
+      screenPosition = EXIT_POT_CALIBRATION_MENU;
+    } else {
+      screenPosition--;
+    }
+    while (screenPosition != EXIT_POT_CALIBRATION_MENU && bitRead(enabledPots, screenPosition)==0) { // if disabled, jump to next enabled in same direction, don't check for exit to menu idx
+      screenPosition--;
+      if (screenPosition < POSITION_DEFAULT) {
+        screenPosition = EXIT_POT_CALIBRATION_MENU;
+      }
+    }
+    return;
+  }
+
+  if (actualScreen == POT_CALIBRATION_SCREEN) {    
+    if (potMin[screenPosition] >= 9) {
+      potMin[screenPosition] = 1;
+    } else {
+      potMin[screenPosition]+=1;
+    }
     return;
   }
 }
@@ -559,6 +635,30 @@ void handleDownButton() {
 
   if (actualScreen == SENSOR_CALIBRATION_SCREEN) {
     moistureMin[screenPosition] = measureRaw(screenPosition);
+    return;
+  }
+
+  if (actualScreen == MENU_POTS_CALIBRATION_SCREEN) {
+    if (screenPosition == EXIT_POT_CALIBRATION_MENU) {
+      screenPosition = POSITION_DEFAULT;
+    } else {
+      screenPosition++;
+    }
+    while (screenPosition != EXIT_POT_CALIBRATION_MENU && bitRead(enabledPots, screenPosition)==0) { // if disabled, jump to next enabled in same direction, don't check for exit to menu idx
+      screenPosition++;
+      if (screenPosition > EXIT_POT_CALIBRATION_MENU) {
+        screenPosition = POSITION_DEFAULT;
+      }
+    }
+    return;
+  }
+
+  if (actualScreen == POT_CALIBRATION_SCREEN) {    
+    if (potMax[screenPosition] >= 9) {
+      potMax[screenPosition] = 1;
+    } else {
+      potMax[screenPosition]+=1;
+    }
     return;
   }
 }
@@ -820,6 +920,39 @@ void sensorsCalibrationMenuScreen() {
   }
 }
 
+void potsCalibrationMenuScreen() {
+  oled.setRow(1);
+  oled.setCol(1);
+  if (screenPosition == EXIT_POT_CALIBRATION_MENU) {
+    oled.print("<");
+  } else {
+    oled.print(" ");
+  }
+  oled.print("Kalibracia polievania");
+  oled.clearToEOL();
+
+  for (byte i = 0; i < MAX_SUPPORTED_POTS; i++) {
+    oled.setRow(i + 2);
+    oled.setCol(1);
+    if (screenPosition == i) {
+      oled.print("*");
+    } else {
+      oled.print(" ");
+    }
+    if (bitRead(enabledPots, i)) {
+      char line[21];
+      sprintf(line, "Kv.%1d - od %1d do %1d", i+1, potMin[i], potMax[i]);
+      oled.print(line);
+      oled.clearToEOL();
+    } else {
+      oled.print("Kv.");
+      oled.print(i+1);
+      oled.print(" off");
+      oled.clearToEOL();
+    }
+  }
+}
+
 void sensorCalibrationScreen() {
   oled.setRow(1);
   oled.setCol(1);
@@ -843,6 +976,26 @@ void sensorCalibrationScreen() {
   oled.setCol(1);
   oled.print("Ulozena (max): ");
   oled.print(moistureMax[screenPosition]);
+  oled.clearToEOL();
+}
+
+void potCalibrationScreen() {
+  oled.setRow(1);
+  oled.setCol(1);
+  oled.print("Kalib. kvetinaca ");
+  oled.print(screenPosition + 1);
+  oled.clearToEOL();
+
+  oled.setRow(5);
+  oled.setCol(1);
+  oled.print("Start: ");
+  oled.print(potMin[screenPosition]);
+  oled.clearToEOL();
+
+  oled.setRow(6);
+  oled.setCol(1);
+  oled.print("Stop: ");
+  oled.print(potMax[screenPosition]);
   oled.clearToEOL();
 }
 
@@ -1032,6 +1185,7 @@ void loadEEPROMvariables() {
       break;
   }  
 
+  // ENABLED SENSORS
   byte enabledSensorsByte = EEPROM.read(ENABLED_SENSORS_EEPROM_ADDR);
   byte enabledSensorsByteXor = EEPROM.read(ENABLED_SENSORS_EEPROM_ADDR + 1);
 
@@ -1040,7 +1194,7 @@ void loadEEPROMvariables() {
   }
   enabledSensors = enabledSensorsByte;
 
-
+  // ENABLED POTS
   byte enabledPotsByte = EEPROM.read(ENABLED_POTS_EEPROM_ADDR);
   byte enabledPotsByteXor = EEPROM.read(ENABLED_POTS_EEPROM_ADDR + 1);
 
@@ -1048,7 +1202,8 @@ void loadEEPROMvariables() {
     enabledPotsByte = 0b11000000; // default turn off all pots
   }
   enabledPots = enabledPotsByte;
-  
+
+  // SENSOR CALIBRATION
   int savedMinSum = 0;
   int savedMaxSum = 0;
   EEPROM.get(MIN_MOISTURE_EEPROM_ADDR, moistureMin);
@@ -1075,6 +1230,35 @@ void loadEEPROMvariables() {
      EEPROM.put(MAX_MOISTURE_EEPROM_ADDR, moistureMax);
      EEPROM.put(MIN_MOISTURE_EEPROM_ADDR + 12, sumMin);
      EEPROM.put(MAX_MOISTURE_EEPROM_ADDR + 12, sumMax);
+  }
+
+  // POTS MIN MAX
+  savedMinSum = 0;
+  savedMaxSum = 0;
+  EEPROM.get(MIN_POT_EEPROM_ADDR, potMin);
+  EEPROM.get(MAX_POT_EEPROM_ADDR, potMax);
+  EEPROM.get(MIN_POT_EEPROM_ADDR + 6, savedMinSum);
+  EEPROM.get(MAX_POT_EEPROM_ADDR + 6, savedMaxSum);
+  int sumMin = 0;
+  int sumMax = 0;
+  for (byte i = 0; i < sizeof(potMin); i++) {
+    sumMin+=potMin[i];
+    sumMax+=potMax[i]; //MUST be same length to potMin !!!!
+  }
+  if (savedMinSum!=sumMin || savedMaxSum!=sumMax) {
+     // Error in stored data, set all to default and save it
+     sumMin = 0;
+     sumMax = 0;
+     for (byte i = 0; i < sizeof(potMin); i++) {
+       potMin[i]=3;
+       potMax[i]=6;
+       sumMin+=potMin[i];
+       sumMax+=potMax[i];
+     }
+     EEPROM.put(MIN_POT_EEPROM_ADDR, potMin);
+     EEPROM.put(MAX_POT_EEPROM_ADDR, potMax);
+     EEPROM.put(MIN_POT_EEPROM_ADDR + 6, sumMin);
+     EEPROM.put(MAX_POT_EEPROM_ADDR + 6, sumMax);
   }
 }
 
