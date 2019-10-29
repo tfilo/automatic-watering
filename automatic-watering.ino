@@ -12,10 +12,10 @@
 #define I2C_OLED_ADDRESS 0x3C
 #define ONE_WIRE_BUS_PIN 13
 
-#define BTN_INTERRUPT_PIN 3
-#define RTC_INTERRUPT_PIN 2
-#define BTN_SET 8
-#define BTN_UP 7
+#define BTN_INTERRUPT_PIN 2
+#define RTC_INTERRUPT_PIN 3
+#define BTN_SET 5
+#define BTN_UP 4
 #define BTN_DOWN 0
 #define NO_BTN 99 //dummy value
 
@@ -28,14 +28,14 @@
 
 #define BATTERY_STATUS A3
 
-#define PUMP_1_PIN 12
+#define PUMP_1_PIN 6
 #define PUMP_2_PIN 11
 #define PUMP_3_PIN 10
 #define PUMP_4_PIN 9
-#define PUMP_5_PIN 5
-#define PUMP_6_PIN 6
+#define PUMP_5_PIN 8
+#define PUMP_6_PIN 7
 
-#define MOISTURE_GROUP1_CONTROL 4
+#define MOISTURE_GROUP1_CONTROL 12
 #define MOISTURE_GROUP2_CONTROL 1
 
 #define MAX_SUPPORTED_POTS 6 // This is max limit for 3 groups of sensors by two sensors in group, there are used all pins for digital pins for pump control too
@@ -203,7 +203,7 @@ void loop(void)
       if (initialWatering) {
         initialWatering = false;
         for (int i=0; i<MAX_SUPPORTED_POTS; i++) {
-          if (bitRead(enabledPots, i)==1 && bitRead(enabledSensors, i)==1) { // check only enabled pots with enabled sensors
+          if (bitRead(enabledPots, i)==1 && bitRead(enabledSensors, i)==1) { // check only enabled pots with enabled sensors
             byte value = measure(i);
             if (value <= potMin[i]) {
               markedPot[i] = true; // need watering
@@ -1239,8 +1239,8 @@ void loadEEPROMvariables() {
   EEPROM.get(MAX_POT_EEPROM_ADDR, potMax);
   EEPROM.get(MIN_POT_EEPROM_ADDR + 6, savedMinSum);
   EEPROM.get(MAX_POT_EEPROM_ADDR + 6, savedMaxSum);
-  int sumMin = 0;
-  int sumMax = 0;
+  sumMin = 0;
+  sumMax = 0;
   for (byte i = 0; i < sizeof(potMin); i++) {
     sumMin+=potMin[i];
     sumMax+=potMax[i]; //MUST be same length to potMin !!!!
