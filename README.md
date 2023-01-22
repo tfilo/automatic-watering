@@ -1,7 +1,7 @@
-# automatic-watering
-This is code for my DIY ATmega328p based watering system with monitoring soil temperature and humidity.
+# Automatic watering
+This is code for my DIY ATmega328p based watering system with monitoring soil temperature and humidity. In EasyEDA - schema folder, there is schematics for this project. It is not tested design and it can have some flaws.
 
-This source code use following libraries:
+This source code use following libraries you must add by yourself:
 
 **DallasTemperature**
 
